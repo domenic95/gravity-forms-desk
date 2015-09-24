@@ -30,136 +30,214 @@ if ( class_exists( 'GFForms' ) ) {
 			return self::$_instance;
 		}
 
+        /*
 		public function plugin_page() {
 			?>
 			This page appears in the Forms menu
 		<?php
 		}
+        */
+
+        public function plugin_settings_fields(){
+            return array(
+                array(
+                    'title'  => 'Desk Settings',
+                    'fields' => array(
+                        array(
+                            'label'             => 'Desk.com URL',
+                            'type'              => 'text',
+                            'name'              => 'url',
+                            'tooltip'           => 'The desk.com url of the account.',
+                            'class'             => 'medium',
+                            'required'           => 1,
+                            'feedback_callback' => array( $this, 'is_valid_setting' )
+                        ),
+                        array(
+                            'label'             => 'Username',
+                            'type'              => 'text',
+                            'name'              => 'username',
+                            'tooltip'           => 'Desk.com account username',
+                            'class'             => 'medium',
+                            'required'           => 1,
+                            'feedback_callback' => array( $this, 'is_valid_setting' )
+                        ),
+                        array(
+                            'label'             => 'Password',
+                            'type'              => 'text',
+                            'input_type'        => 'password',
+                            'name'              => 'password',
+                            'tooltip'           => 'Desk.com account username',
+                            'class'             => 'medium',
+                            'required'           => 1,
+                            'feedback_callback' => array( $this, 'is_valid_setting' )
+                        )
+                    )
+                )
+            );
+        }
+
+        public function feed_list_columns(){
+            return array('title' => 'Title');
+        }
+
+        public function process_feed( $feed, $entry, $form ) {
+            $new_feed = array(
+                'to'        => $feed['meta']['to'],
+                'subject'   => $feed['meta']['subject'],
+                'group'     => $feed['meta']['assigned_group'],
+                'name'      => $this->get_field_value( $form, $entry, $feed['meta']['mappedFields_name'] ),
+                'email'     => $this->get_field_value( $form, $entry, $feed['meta']['mappedFields_email'] ),
+                'phone'     => $this->get_field_value( $form, $entry, $feed['meta']['mappedFields_phone'] ),
+                'message'   => $this->get_field_value( $form, $entry, $feed['meta']['mappedFields_message'] )
+            );
+
+            $resp = $this->create_desk_case($new_feed);
+            //$resp = "Desk create case response message.";
+
+            $this->add_note($entry['id'], $resp);
+        }
+
+        private function create_desk_case($feed){
+
+            $plugin_settings = $this->get_plugin_settings();
+
+            $message = "Name:\n" . $feed['name'] . "\nPhone:\n" . $feed['phone'] ."\nMessage:\n" . $feed['message'];
+            $case = array(
+                'type'              => 'email',
+                'name'              => $feed['name'],
+                'phone'             => $feed['phone'],
+                'subject'           => $feed['subject'],
+                'status'            => 'new',
+                '_links'            => array(
+                                        'assigned_group' => array(
+                                            'href'  => "/api/v2/groups/{$feed['group']}",
+                                            'class' => 'group')),
+                'message'           => array(
+                                        'direction' => 'in',
+                                        'status'    => 'received',
+                                        'to'        => $feed['to'],
+                                        'from'      => $feed['email'],
+                                        'subject'   => $feed['subject'],
+                                        'body'      => $message,
+
+                )
+            );
+
+
+            $data = json_encode($case);
+
+            $curl = curl_init("https://{$plugin_settings['url']}/api/v2/cases");
+            curl_setopt($curl, CURLOPT_USERPWD, "{$plugin_settings['username']}:{$plugin_settings['password']}");
+            curl_setopt($curl, CURLOPT_HTTPHEADER, array(
+                'Accept: application/json',
+                'Content-Type: application/json'
+            ));
+            curl_setopt($curl, CURLOPT_RETURNTRANSFER, 1);
+            curl_setopt($curl, CURLOPT_POSTFIELDS, $data);
+
+            $resp = curl_exec($curl);
+
+            return($resp);
+
+        }
+
+        private function desk_curl($resource, $object = null, $method=1)
+        {
+            $plugin_settings = $this->get_plugin_settings();
+            $data = json_encode($object);
+
+            $curl = curl_init("https://{$plugin_settings['url']}/api/v2/$resource");
+            curl_setopt($curl, CURLOPT_USERPWD, "{$plugin_settings['username']}:{$plugin_settings['password']}");
+            curl_setopt($curl, CURLOPT_HTTPHEADER, array(
+                'Accept: application/json',
+                'Content-Type: application/json'
+            ));
+
+            if($method === "GET")
+            {
+                curl_setopt($curl, CURLOPT_POST, 0);
+                curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'GET');
+            }
+            else{
+                curl_setopt($curl, CURLOPT_POST, 1);
+            }
+
+
+            curl_setopt($curl, CURLOPT_RETURNTRANSFER, 1);
+
+            if($data !== null)
+                curl_setopt($curl, CURLOPT_POSTFIELDS, $data);
+
+            $resp = curl_exec($curl);
+
+            return ($resp);
+        }
+
+        private function get_desk_groups_choices(){
+            $resp = $this->desk_curl('groups', null, "GET");
+            $decode = json_decode($resp);
+            $groups = $decode->_embedded->entries;
+            $choices = array();
+            foreach($groups as $group){
+                $choices[] = array(
+                    'label' => $group->name,
+                    'value' => $group->id
+                );
+            }
+            return $choices;
+        }
 
 		public function feed_settings_fields() {
 			return array(
 				array(
+                    'description' => $this->field_map_table_header(),
 					'title'  => 'Desk Form Settings',
 					'fields' => array(
-						array(
-							'label'   => 'My checkbox',
-							'type'    => 'checkbox',
-							'name'    => 'enabled',
-							'tooltip' => 'This is the tooltip',
-							'choices' => array(
-								array(
-									'label' => 'Enabled',
-									'name'  => 'enabled'
-								)
-							)
-						),
-						array(
-							'label'   => 'My checkboxes',
-							'type'    => 'checkbox',
-							'name'    => 'checkboxgroup',
-							'tooltip' => 'This is the tooltip',
-							'choices' => array(
-								array(
-									'label' => 'First Choice',
-									'name'  => 'first'
-								),
-								array(
-									'label' => 'Second Choice',
-									'name'  => 'second'
-								),
-								array(
-									'label' => 'Third Choice',
-									'name'  => 'third'
-								)
-							)
-						),
-						array(
-							'label'   => 'My Radio Buttons',
-							'type'    => 'radio',
-							'name'    => 'myradiogroup',
-							'tooltip' => 'This is the tooltip',
-							'choices' => array(
-								array(
-									'label' => 'First Choice'
-								),
-								array(
-									'label' => 'Second Choice'
-								),
-								array(
-									'label' => 'Third Choice'
-								)
-							)
-						),
-						array(
-							'label'      => 'My Horizontal Radio Buttons',
-							'type'       => 'radio',
-							'horizontal' => true,
-							'name'       => 'myradiogrouph',
-							'tooltip'    => 'This is the tooltip',
-							'choices'    => array(
-								array(
-									'label' => 'First Choice'
-								),
-								array(
-									'label' => 'Second Choice'
-								),
-								array(
-									'label' => 'Third Choice'
-								)
-							)
-						),
-						array(
-							'label'   => 'My Dropdown',
-							'type'    => 'select',
-							'name'    => 'mydropdown',
-							'tooltip' => 'This is the tooltip',
-							'choices' => array(
-								array(
-									'label' => 'First Choice',
-									'value' => 'first'
-								),
-								array(
-									'label' => 'Second Choice',
-									'value' => 'second'
-								),
-								array(
-									'label' => 'Third Choice',
-									'value' => 'third'
-								)
-							)
-						),
-						array(
-							'label'             => 'My Text Box',
-							'type'              => 'text',
-							'name'              => 'mytext',
-							'tooltip'           => 'This is the tooltip',
-							'class'             => 'medium',
-							'feedback_callback' => array( $this, 'is_valid_setting' )
-						),
-						array(
-							'label'   => 'My Text Area',
-							'type'    => 'textarea',
-							'name'    => 'mytextarea',
-							'tooltip' => 'This is the tooltip',
-							'class'   => 'medium merge-tag-support mt-position-right'
-						),
-						array(
-							'label' => 'My Hidden Field',
-							'type'  => 'hidden',
-							'name'  => 'myhidden'
-						),
-						array(
-							'label' => 'My Custom Field',
-							'type'  => 'my_custom_field_type',
-							'name'  => 'my_custom_field'
-						),
-						array(
-							'type'           => 'feed_condition',
-							'name'           => 'mycondition',
-							'label'          => __( 'Opt-In Condition', 'simplefeedaddon' ),
-							'checkbox_label' => __( 'Enable Condition', 'simplefeedaddon' ),
-							'instructions'   => __( 'Process this example feed if', 'simplefeedaddon' )
-						)
+                        array(
+                            'label'             => 'Title',
+                            'type'              => 'text',
+                            'name'              => 'title',
+                            'tooltip'           => 'The title of the feed.',
+                            'class'             => 'medium',
+                            'required'           => 1,
+                            'feedback_callback' => array( $this, 'is_valid_setting' )
+                        ),
+                        array(
+                            'label'             => 'To',
+                            'type'              => 'text',
+                            'name'              => 'to',
+                            'tooltip'           => 'Desk.com email.',
+                            'class'             => 'medium',
+                            'required'           => 1,
+                            'feedback_callback' => array( $this, 'is_valid_setting' )
+                        ),
+                        array(
+                            'label'             => 'Subject',
+                            'type'              => 'text',
+                            'name'              => 'subject',
+                            'tooltip'           => 'The subject of the feed.',
+                            'class'             => 'medium',
+                            'required'          => 1,
+                            'feedback_callback' => array( $this, 'is_valid_setting' )
+                        ),
+                        array(
+                            'label'   => 'Assigned Group',
+                            'type'    => 'select',
+                            'name'    => 'assigned_group',
+                            'tooltip' => 'Group to assign case to.',
+                            'choices' => $this->get_desk_groups_choices()
+                        ),
+                        array(
+                            "name" => "mappedFields",
+                            "label" => "Map Fields",
+                            "type" => "field_map",
+                            "field_map" => array(
+                                array("name" => "name", "label" => "Name", "required" => 1),
+                                array("name" => "phone", "label" => "Phone", "required" => 1),
+                                array("name" => "email", "label" => "Email", "required" => 1),
+                                array("name" => "message", "label" => "Message", "required" => 1)
+                            )
+                        )
 					)
 				)
 			);
